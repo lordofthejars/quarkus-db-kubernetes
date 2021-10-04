@@ -24,11 +24,10 @@ public class DeveloperResourceTest {
         d.age = 41;
 
         given()
-        .with()
         .contentType(ContentType.JSON)
         .body(d)
         .when()
-        .request("POST", "/developer")
+        .post("/developer")
         .then()
         .statusCode(200);
     }
