@@ -50,43 +50,5 @@ public class DeveloperResource {
         return "Neo, awake";
     }
 
-    @GET
-    @Path("/{id}")
-    public Optional<Developer> findById(@PathParam("id") Long id) {
-        return Developer.findByIdOptional(id);
-    }
-
-    @GET
-    @Retry(delay = 3000, maxRetries = 3, abortOn = FaultToleranceDefinitionException.class)
-    @Timeout(value = 1000)
-    @Fallback(ListDevelopersFallback.class)
-    public List<Developer> findByName(@QueryParam("name") String name) {
-        
-        if (misbehave) {
-            throw new IllegalArgumentException("This service is misbehaving");
-        }
-
-        if (sleep) {
-            try {
-                TimeUnit.SECONDS.sleep(3);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
-        if (name == null) {
-            return Developer.listAll();
-        }
-
-        return Developer.list("name", name);
-    }
-
-    @POST
-    @Transactional
-    public Developer create(Developer developer) {
-        developer.persist();
-        return developer;
-    }
-
 
 }

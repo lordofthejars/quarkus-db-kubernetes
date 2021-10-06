@@ -15,32 +15,5 @@ import static org.hamcrest.CoreMatchers.hasItems;
 @TestMethodOrder(OrderAnnotation.class)
 public class DeveloperResourceTest {
 
-    @Order(1)
-    @Test
-    public void testInsertDeveloper() {
-        
-        Developer d = new Developer();
-        d.name = "Alex";
-        d.age = 41;
-
-        given()
-        .contentType(ContentType.JSON)
-        .body(d)
-        .when()
-        .post("/developer")
-        .then()
-        .statusCode(200);
-    }
-
-    @Order(2)
-    @Test
-    public void testListDevelopers() {
-        given()
-          .when().get("/developer")
-          .then()
-             .statusCode(200)
-             .assertThat()
-             .body("name", hasItems("Alex"));
-    }
 
 }
