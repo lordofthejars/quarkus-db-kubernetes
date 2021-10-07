@@ -57,9 +57,6 @@ public class DeveloperResource {
     }
 
     @GET
-    @Retry(delay = 3000, maxRetries = 3, abortOn = FaultToleranceDefinitionException.class)
-    @Timeout(value = 1000)
-    @Fallback(ListDevelopersFallback.class)
     public List<Developer> findByName(@QueryParam("name") String name) {
         
         if (misbehave) {
