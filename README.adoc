@@ -1,0 +1,450 @@
+= Quarkus Kubernetes Persistence
+
+This is a workshop to develop a Quarkus example with persistence (Panache) involved, containerizing the app and deploying to Kubernetes cluster.
+
+== Requirements
+
+* git
+* Java >11 
+* Kubernetes cluster (in this case Developer Sandbox https://developers.redhat.com/developer-sandbox is used)
+
+
+== Preparation
+
+Clone current repository:
+
+[source, bash]
+----
+git clone https://github.com/redhat-developer-demos/quarkus-db-kubernetes.git
+----
+
+And enter to the project repository.
+
+[source, bash]
+----
+cd quarkus-db-kubernetes
+----
+
+Finally run the following command to download all dependencies:
+
+[source, bash]
+----
+./mvnw clean install
+----
+
+Most dependencies required for the tutorial are already registered in the `pom.xml` file, so after the above call most of them are downloaded and available locally.
+
+== Persistence
+
+=== Dependencies
+
+As noted before dependencies are already placed in the `pom.xml` file, but in case of a new project you should add them:
+
+[source, xml]
+----
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-jdbc-postgresql</artifactId>
+</dependency>
+
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-hibernate-orm-panache</artifactId>
+</dependency>
+
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-resteasy-jsonb</artifactId>
+</dependency>
+
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-jdbc-h2</artifactId>
+    <scope>test</scope>
+</dependency>
+----
+
+Moreover, since we don't want to develop a UI, Swagger UI dependency is registered:
+
+[source, xml]
+----
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-smallrye-openapi</artifactId>
+</dependency>
+----
+
+=== Code
+
+Let's create a new entity class that represents a developer:
+
+[source, java]
+.org/acme/Developer.java
+----
+package org.acme;
+
+import javax.persistence.Column;
+import javax.persistence.Entity;
+
+import io.quarkus.hibernate.orm.panache.PanacheEntity;
+
+@Entity
+public class Developer extends PanacheEntity { // <1>
+
+    @Column public String name;
+    @Column public int age;
+
+}
+----
+<1> Panache framework is used to implement Active Record pattern
+
+Open `DeveloperResource.java` and add the following methods to implement developer operations:
+
+[source, java]
+.org/acme/DeveloperResource.java
+----
+@GET
+@Path("/{id}")
+public Optional<Developer> findById(@PathParam("id") Long id) {
+    return Developer.findByIdOptional(id); // <1>
+}
+
+@GET
+public List<Developer> findByName(@QueryParam("name") String name) {
+        
+    if (misbehave) {
+        throw new IllegalArgumentException("This service is misbehaving");
+    }
+
+    if (sleep) {
+        try {
+            TimeUnit.SECONDS.sleep(3);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    if (name == null) {
+        return Developer.listAll(); // <2>
+    }
+
+    return Developer.list("name", name); // <3>
+}
+
+@POST
+@Transactional
+public Developer create(Developer developer) {
+    developer.persist(); // <4>
+    return developer;
+}
+----
+<1> Find developer by id
+<2> List all developers
+<3> List developer by name
+<4> Create a new developer
+
+=== Configuration
+
+Finally, update the configuration file located at `src/main/resources/application.properties` with the datasource information:
+
+[source, properties]
+.src/main/resources/application.properties
+----
+# <1>
+quarkus.swagger-ui.always-include=true
+
+# <2>
+quarkus.datasource.db-kind=postgresql
+
+# <3>
+%dev.quarkus.hibernate-orm.database.generation=update
+%dev.quarkus.hibernate-orm.log.sql=true
+
+# <4>
+%test.quarkus.datasource.db-kind=h2
+%test.quarkus.hibernate-orm.database.generation=drop-and-create
+%test.quarkus.hibernate-orm.log.sql=true
+----
+<1> Adds Swagger UI
+<2> By default uses PostgreSQL driver
+<3> At dev mode, Hibernate schema generation property is set to update
+<4> At test mode, H2 driver is used
+
+=== Test
+
+Test is an important part too, open `src/test/java/org/acme/DeveloperResourceTest.java` and update the tests:
+
+[source, java]
+.org.acme.DeveloperResourceTest.java
+----
+@Order(1)
+@Test
+public void testInsertDeveloper() {
+    Developer d = new Developer();
+    d.name = "Alex";
+    d.age = 41;
+
+    given()
+    .contentType(ContentType.JSON)
+    .body(d)
+    .when()
+    .post("/developer")
+    .then()
+    .statusCode(200);
+}
+
+@Order(2)
+@Test
+public void testListDevelopers() {
+    given()
+    .when().get("/developer")
+    .then()
+    .statusCode(200)
+    .assertThat()
+    .body("name", hasItems("Alex"));
+}
+----
+
+=== Running
+
+After all these changes, you can start the application in dev mode to be able to interact with the application and at the same time do changes at the code which are automatically reflected to the running instance.
+
+In a terminal window run the following command:
+
+[source, bash]
+----
+./mvnw compile quarkus:dev
+
+
+----
+
+Then open a browser and navigate to http://localhost:8080/q/swagger-ui
+
+There you can play with Swagger UI to find and insert new developers.
+
+image
+
+Let's see live reloding in action, open `org/acme/Developer.java` class and add a new field:
+
+[source, java]
+----
+@Column public String favouriteLanguage;
+----
+
+Then without doing anything else, just refresh the browser and the change is automatically reflected.
+
+== Kubernetes
+
+Now it's time to deploy this application to Kubernetes.
+
+=== Dependencies
+
+As noted before dependencies are already placed in the `pom.xml` file, but in case of a new project you should add them:
+
+[source, xml]
+----
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-kubernetes</artifactId>
+</dependency>
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-container-image-jib</artifactId>
+</dependency>
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-flyway</artifactId>
+</dependency>
+----
+
+=== Deploy PostgreSQL instance
+
+OpenShift Template
+
+=== Configuration
+
+We need to create a container and push it to a Docker registry.
+To do it we added the `quarkus-container-image-jib` dependency so the image is automatically created and pushed.
+
+Then since we are at production, we'll use Flyway to create the database schema with a SQL file instead of relying to the automatic generation provided by Hibernate which might not be the best one for production environments.
+
+Finally, as the `quarkus-kubernetes` extension was provided, deployment of the service to the configured Kubernetes cluster is just calling a command.
+
+IMPORTANT: You need to have a Kubernetes cluster configured in the same terminal as you are running Maven (i.e `oc login` in case of OpenShift).
+
+[source, properties]
+.src/main/resources/application.properties
+----
+# <1>
+quarkus.container-image.group=lordofthejars
+quarkus.container-image.registry=quay.io
+
+# <2>
+%prod.quarkus.datasource.username=admin
+%prod.quarkus.datasource.password=admin
+%prod.quarkus.datasource.jdbc.url=jdbc:postgresql://postgresql:5432/db
+%prod.quarkus.flyway.migrate-at-start=true
+
+# <3>
+quarkus.kubernetes.expose=true
+quarkus.kubernetes.service-type=load-balancer
+----
+<1> Jib configuration (artifact and tag are get from `pom.xml`)
+<2> DataSource configuration for production profile
+<3> Kubernetes configuration (Ingress and service as LoadBalancer)
+
+IMPORTANT: Jib extension uses `docker login` information to push the image. Run `docker login` command in a terminal if you haven't done yet.
+
+=== SQL files
+
+Create a new SQL file to be imported by Flyway at `src/main/resources/db/migration/V1.0.0__Quarkus.sql`:
+
+[source, sql]
+.V1.0.0__Quarkus.sql
+----
+create table Developer (id int8 not null, age int4, name varchar(255), primary key (id));
+
+create sequence hibernate_sequence start 1 increment 1;
+----
+
+=== Deploy
+
+To create the container, push it to configured registry and deploy it to Kubernetes cluster, run the following command:
+
+[source, bash]
+----
+./mvnw clean package -DskipTests -Dquarkus.kubernetes.deploy=true
+----
+
+== Kubernetes Secrets
+
+Instead of setting the PostgreSQL login & password as a configuration value, we could use a Kubernetes secrets for such.
+
+When creating a PostgreSQL instance in OpenShift using templates, a Kubernetes Secret is automatically created with such information.
+
+=== Generting Resources with Kubernetes Secret
+
+The only thing we need to do is to configure the application so that generated Kubernetes resource to deploy the application injects secret values as environment variables:
+
+First of all remove the following entries:
+
+[source, properties]
+.application.properties
+----
+%prod.quarkus.datasource.username=admin
+%prod.quarkus.datasource.password=admin
+%prod.quarkus.datasource.jdbc.url=jdbc:postgresql://postgresql:5432/db
+----
+
+And then use Kubernetes properties to add the secrets  injecction:
+
+[source, properties]
+.application.properties
+----
+# <1>
+quarkus.kubernetes.env.secrets=postgresql-ephemeral-parameters-9hqkg  
+
+# <2>
+quarkus.kubernetes.env.mapping.database-name.from-secret=postgresql-ephemeral-parameters-9hqkg 
+
+# <3>
+quarkus.kubernetes.env.mapping.database-name.with-key=POSTGRESQL_DATABASE 
+
+quarkus.kubernetes.env.mapping.database-user.from-secret=postgresql-ephemeral-parameters-9hqkg
+
+quarkus.kubernetes.env.mapping.database-user.with-key=POSTGRESQL_USER
+
+quarkus.kubernetes.env.mapping.database-password.from-secret=postgresql-ephemeral-parameters-9hqkg
+
+quarkus.kubernetes.env.mapping.database-password.with-key=POSTGRESQL_PASSWORD
+
+# <4>
+
+%prod.quarkus.datasource.jdbc.url=jdbc:postgresql://postgresql:5432/${database-name}
+%prod.quarkus.datasource.username=${database-user}
+%prod.quarkus.datasource.password=${database-password}
+----
+<1> Configures the Kubernetes secret name (`postgresql-ephemeral-parameters-9hqkg`)
+<2> Gets Database name
+<3> Injects Database name in `POSTGRESQL_DATABASE` env var
+<4> Injects Database name in the jdbc configuration property
+
+=== Deploy
+
+To create the container, push it to configured registry and deploy it to Kubernetes cluster, run the following command:
+
+[source, bash]
+----
+./mvnw clean package -DskipTests -Dquarkus.kubernetes.deploy=true
+----
+
+TIP: If you are interested on inspecting the deployment file you can check it at `target/kubernetes/kubernetes.yaml` directory.
+
+== Kubernetes Secrets in memory
+
+So far, PostgreSQL credentials are loaded from a Kubernetes Secret.
+There is nothing wrong with that but injecting secrets as environment variables or volumes might result in a security issues if the Pod is compromised.
+
+To avoid this problem, Quarkus allows you to inject directly the Kubernetes Secrets into memory without having to map them as environment variable nor a volume by using Kubernetes Config extension.
+
+=== Dependencies
+
+Regsiter the following extension in `pom.xml` file.
+
+[source, xml]
+.pom.xml
+----
+<dependency>
+    <groupId>io.quarkus</groupId>
+    <artifactId>quarkus-kubernetes-config</artifactId>
+</dependency>
+----
+
+=== Configuration
+
+Removes the following properties from `application.properties` as they are not needed anymore as we are not going to genereate deployment files with secrets:
+
+[source, properties]
+.application.properties
+----
+quarkus.kubernetes.env.secrets=postgresql-ephemeral-parameters-9hqkg
+quarkus.kubernetes.env.mapping.database-name.from-secret=postgresql-ephemeral-parameters-9hqkg
+quarkus.kubernetes.env.mapping.database-name.with-key=POSTGRESQL_DATABASE
+quarkus.kubernetes.env.mapping.database-user.from-secret=postgresql-ephemeral-parameters-9hqkg
+quarkus.kubernetes.env.mapping.database-user.with-key=POSTGRESQL_USER
+quarkus.kubernetes.env.mapping.database-password.from-secret=postgresql-ephemeral-parameters-9hqkg
+quarkus.kubernetes.env.mapping.database-password.with-key=POSTGRESQL_PASSWORD
+
+%prod.quarkus.datasource.jdbc.url=jdbc:postgresql://postgresql:5432/${database-name}
+%prod.quarkus.datasource.username=${database-user}
+%prod.quarkus.datasource.password=${database-password}
+----
+
+And add the following properties:
+
+[source, properties]
+----
+# <1>
+%prod.quarkus.kubernetes-config.secrets.enabled=true
+
+# <2>
+%prod.quarkus.kubernetes-config.secrets=postgresql-ephemeral-parameters-9hqkg
+
+# <3>
+%prod.quarkus.datasource.jdbc.url=jdbc:postgresql://postgresql:5432/${POSTGRESQL_DATABASE}
+%prod.quarkus.datasource.username=${POSTGRESQL_USER}
+%prod.quarkus.datasource.password=${POSTGRESQL_PASSWORD}
+----
+<1> Enables injection of Kubernetes Secrets in memory
+<2> Sets the Kubernetes Secrets to read
+<3> Kubernetes Secrets Data can be injected directly as a property
+
+=== Deploy
+
+To create the container, push it to configured registry and deploy it to Kubernetes cluster, run the following command:
+
+[source, bash]
+----
+./mvnw clean package -DskipTests -Dquarkus.kubernetes.deploy=true
+----
+
